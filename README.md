@@ -1,159 +1,324 @@
 ---
 
-# 📄 Foundational RAG (Retrieval-Augmented Generation) – Retrieval Layer Implementation
+# RAG + MCP Project (Vector-Based Retrieval System)
 
 ## Overview
 
-This project implements the **foundational retrieval layer of a Retrieval-Augmented Generation (RAG) system**.
-The focus of this implementation is on **document processing, embedding generation, vector storage, and similarity-based retrieval**.
+This project implements a **Retrieval-Augmented system** using **vector embeddings**, a **FAISS vector database**, and **Model Context Protocol (MCP)** tools.
 
-The project intentionally **does not include LLM-based answer generation**, as the goal is to clearly understand and demonstrate how the **retrieval component of RAG works in isolation**.
+The goal of this project is to demonstrate, end-to-end, how:
+
+* Unstructured documents can be converted into embeddings
+* Those embeddings can be stored and searched using semantic similarity
+* Retrieval functionality can be exposed as MCP tools
+* The system can safely return relevant information **without hallucination**
+
+This implementation focuses on **correctness, clarity, and explainability**, rather than UI or framework-heavy abstractions.
 
 ---
 
-## What This Project Demonstrates
+## What This Project Is (and Is Not)
 
-This repository covers the following core RAG concepts:
+### This project **is**:
 
-* Creating a document-based knowledge base using Markdown files
-* Splitting documents into smaller, meaningful chunks
-* Generating vector embeddings for each chunk
-* Storing embeddings in a FAISS vector database
-* Performing similarity search to retrieve the most relevant chunks for a user query
-* Returning retrieved content along with metadata and similarity scores
+* A vector-based semantic retrieval system
+* A clean example of Retrieval-Augmented design
+* An MCP server exposing retrieval tools
+* Grounded, deterministic, and explainable
+
+### This project **is not**:
+
+* A chatbot UI
+* A keyword-based search engine
+* A full LLM-powered conversational agent
+* A framework-dependent demo
 
 ---
 
 ## High-Level Architecture
 
-The overall flow of the system is as follows:
-
-1. **Document Loading**
-   Markdown documents are loaded from the knowledge base directory.
-
-2. **Chunking**
-   Documents are split into overlapping text chunks to preserve context.
-
-3. **Embedding Generation**
-   Each chunk is converted into a vector embedding using a sentence-level embedding model.
-
-4. **Vector Storage**
-   Embeddings are stored in a FAISS vector index for efficient similarity search.
-
-5. **Query Retrieval**
-   A user query is embedded and compared against stored vectors to retrieve the most relevant chunks.
+```
+Markdown Documents
+        ↓
+Semantic Chunking
+        ↓
+Embeddings Generation
+        ↓
+FAISS Vector Store
+        ↓
+Similarity Search
+        ↓
+Filtering & Confidence Checks
+        ↓
+MCP Tools (search / answer)
+```
 
 ---
 
 ## Project Structure
 
 ```
-rag-project/
+rag-mcp-project/
 │
 ├── data/
 │   └── knowledge_base/
-│       └── *.md                # Source documents
+│       └── company_policies.md
 │
 ├── src/
-│   ├── load_and_chunk.py       # Document loading and chunking logic
-│   ├── embeddings.py           # Embedding generation
-│   ├── vector_store.py         # FAISS index creation and storage
-│   ├── retrieve.py             # Similarity search and retrieval
+│   ├── ingest.py          # Load and chunk documents
+│   ├── embeddings.py     # Generate embeddings
+│   ├── vector_store.py   # FAISS vector store
+│   ├── build_index.py    # Build & cache vector index
+│   ├── retrieval.py      # Retrieval logic
+│   └── mcp_server.py     # MCP server & tools
 │
-├── main.py                     # Entry point to run retrieval
-├── requirements.txt            # Project dependencies
-└── README.md                   # Project documentation
+├── requirements.txt
+├── .env
+└── README.md
 ```
 
 ---
 
-## Tech Stack
+## Knowledge Base
 
-* **Python**
-* **SentenceTransformers** – for text embeddings
-* **FAISS** – for vector storage and similarity search
+The knowledge base consists of **Markdown documents** containing company policies.
+
+Example content:
+
+* Company Leave Policy
+* Work From Home Policy
+* Security Policy
+
+These documents are **unstructured text**, which makes them unsuitable for traditional relational databases and ideal for vector-based retrieval.
 
 ---
 
-## How to Run the Project
+## Step-by-Step Implementation Explanation
 
-### 1. Install Dependencies
+### 1. Document Ingestion & Chunking (`ingest.py`)
+
+**Purpose**
+Convert raw markdown documents into meaningful, retrievable chunks.
+
+**How it works**
+
+* Each markdown file is read
+* Content is split by headings (`#`)
+* Each section becomes one semantic chunk
+* Metadata is attached to each chunk:
+
+  * Section name
+  * Source file
+  * Chunk ID
+
+**Why this approach**
+
+* One chunk represents one semantic topic
+* Prevents unrelated content from mixing
+* Keeps retrieval explainable
+
+---
+
+### 2. Embeddings Generation (`embeddings.py`)
+
+**Purpose**
+Convert text into numerical representations of meaning.
+
+**How it works**
+
+* Uses a sentence-transformer model
+* Each chunk’s text is converted into a high-dimensional vector
+* Similar meanings → closer vectors
+
+**Key concept**
+Embeddings represent **semantic meaning**, not keywords.
+
+---
+
+### 3. Vector Storage (`vector_store.py`)
+
+**Purpose**
+Store embeddings and enable fast similarity search.
+
+**How it works**
+
+* FAISS stores only numeric vectors
+* Text and metadata are stored alongside the vectors
+* L2 distance is used to compute similarity
+* Distance is converted into a similarity score
+
+**Important note**
+FAISS always returns the nearest neighbors — even for weak matches.
+Relevance is handled at the retrieval layer.
+
+---
+
+### 4. Index Construction (`build_index.py`)
+
+**Purpose**
+Build the vector index once and reuse it safely.
+
+**How it works**
+
+* Loads chunks
+* Generates embeddings
+* Stores embeddings, text, and metadata in FAISS
+* Uses lazy initialization (singleton pattern)
+
+**Why this matters**
+
+* Prevents expensive recomputation
+* Safe for MCP STDIO mode
+* Faster repeated queries
+
+---
+
+### 5. Retrieval Logic (`retrieval.py`)
+
+**Purpose**
+Control which results are considered relevant.
+
+**How it works**
+
+* Query is embedded
+* FAISS returns top-k nearest vectors
+* Results are filtered by:
+
+  * Similarity threshold
+  * Deduplication by section
+* Returns structured results:
+
+  * Content
+  * Metadata
+  * Similarity score
+
+**Why thresholds are required**
+Vector databases return *nearest*, not *correct*.
+Thresholds prevent weak or irrelevant matches from surfacing.
+
+---
+
+### 6. MCP Server & Tools (`mcp_server.py`)
+
+**Purpose**
+Expose retrieval functionality via MCP tools.
+
+#### Tool: `search_documents`
+
+* Returns structured evidence
+* Includes metadata and similarity scores
+* Useful for inspection and debugging
+
+#### Tool: `answer_question`
+
+* Uses retrieved evidence
+* Applies an additional confidence gate
+* Returns grounded answers only
+* Refuses to answer if evidence is weak
+
+**Why MCP**
+MCP standardizes how AI capabilities are exposed and consumed by agents or tools.
+
+---
+
+## How Data Flows Through the System
+
+### Example Query
+
+> “What about unused leaves?”
+
+### Flow
+
+```
+User Query
+   ↓
+Query Embedding
+   ↓
+Vector Similarity Search
+   ↓
+Top Matching Chunks
+   ↓
+Threshold & Confidence Checks
+   ↓
+MCP Tool Response
+```
+
+### Important Behavior
+
+* The system retrieves **policy sections**, not sentences
+* Fine-grained answers can be layered later using an LLM
+* This design avoids hallucination and remains auditable
+
+---
+
+## Testing the System
+
+The system is tested using **MCP Inspector**.
+
+### Start MCP Inspector
 
 ```bash
-pip install -r requirements.txt
+npx @modelcontextprotocol/inspector --stdio
 ```
 
-### 2. Add Documents
+### Example Queries
 
-Place your Markdown documents inside:
+**Search**
 
+```json
+{
+  "query": "What is the leave policy?",
+  "top_k": 3
+}
 ```
-data/knowledge_base/
+
+**Answer**
+
+```json
+{
+  "query": "Summarize the security requirements"
+}
 ```
 
-### 3. Run the Retrieval Pipeline
+**Negative Case**
 
-```bash
-python main.py
+```json
+{
+  "query": "What is the cafeteria menu?"
+}
 ```
+
+Expected behavior:
+
+* Relevant questions return correct policy sections
+* Irrelevant questions return:
+
+  > “No relevant information found in the knowledge base.”
 
 ---
 
-## Example Usage
+## Why This Design Is Correct
 
-**Sample Query:**
+* Chunking is semantic, not arbitrary
+* Retrieval is explainable
+* No hallucinated answers
+* Confidence-based refusal is supported
+* MCP tools are cleanly separated
+* Framework-agnostic and extensible
 
-```
-What is the company leave policy?
-```
+This is a **strong foundation** for adding:
 
-**Sample Output:**
-
-* Retrieved text chunk related to leave policy
-* Metadata (document name, section, chunk ID)
-* Similarity score indicating relevance
-
-This output can later be passed to an LLM for answer generation, if required.
-
----
-
-## Scope Clarification
-
-This project focuses **only on the retrieval layer** of a RAG system.
-
-The following are **intentionally excluded**:
-
-* LLM-based answer generation
-* Chat interfaces or UI
-* Agent frameworks or orchestration logic
-
-These can be added as extensions in future tasks.
+* LLM-based synthesis
+* Conversational agents
+* UI layers
+* Hybrid retrieval (vector + graph)
 
 ---
 
-## Learning Outcome
+## Key Takeaway
 
-By completing this project, you gain a clear understanding of:
-
-* Why chunking is required in RAG systems
-* How embeddings represent text semantically
-* How vector databases enable efficient retrieval
-* How retrieval augments language models with external knowledge
+> This project focuses on **retrieval correctness**, not surface-level demos.
+> It demonstrates how real-world RAG systems are designed from the inside out.
 
 ---
 
-## Future Enhancements (Optional)
-
-* Integrate an LLM to generate answers using retrieved context
-* Add hybrid retrieval (keyword + vector search)
-* Expose retrieval as an API or tool
-* Implement confidence-based filtering for responses
-
----
-
-## Author
-
-**Sushma S**
-AI Intern – BlazeUp Training Program
-
----
